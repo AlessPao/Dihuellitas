@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import pg from 'pg';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { addDays } from 'date-fns';
 
 dotenv.config();
 
@@ -266,6 +267,98 @@ app.patch('/api/admin/appointments/:id', verifyToken, async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Coupon routes
+app.post('/api/coupons', verifyToken, async (req, res) => {
+  const { rewardName, rewardCost } = req.body;
+  const userId = req.userId;
+
+  try {
+    const userResult = await pool.query('SELECT points FROM users WHERE id = $1', [userId]);
+    
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    const userPoints = userResult.rows[0].points;
+
+    if (userPoints < rewardCost) {
+      return res.status(400).json({ message: 'Not enough points' });
+    }
+
+    const couponCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+    const expirationDate = addDays(new Date(), 30); // Coupon valid for 30 days
+
+    const result = await pool.query(
+      'INSERT INTO coupons (user_id, code, reward, expiration_date, used) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [userId, couponCode, rewardName, expirationDate, false]
+    );
+
+    await pool.query('UPDATE users SET points = points - $1 WHERE id = $2', [rewardCost, userId]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating coupon:', error);
+    res.status(500).json({ message: 'Server error while creating coupon' });
+  }
+});
+
+app.get('/api/coupons', verifyToken, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM coupons WHERE user_id = $1', [req.userId]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching user coupons:', error);
+    res.status(500).json({ message: 'Server error while fetching coupons' });
+  }
+});
+
+app.get('/api/admin/coupons', verifyToken, async (req, res) => {
+  try {
+    const userResult = await pool.query('SELECT is_admin FROM users WHERE id = $1', [req.userId]);
+    
+    if (userResult.rows.length === 0 || !userResult.rows[0].is_admin) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const result = await pool.query(`
+      SELECT c.*, u.first_name, u.last_name, u.email
+      FROM coupons c
+      JOIN users u ON c.user_id = u.id
+      ORDER BY c.expiration_date DESC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching all coupons:', error);
+    res.status(500).json({ message: 'Server error while fetching coupons' });
+  }
+});
+
+app.patch('/api/admin/coupons/:id', verifyToken, async (req, res) => {
+  const { id } = req.params;
+  const { used } = req.body;
+
+  try {
+    const userResult = await pool.query('SELECT is_admin FROM users WHERE id = $1', [req.userId]);
+    if (!userResult.rows[0].is_admin) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const result = await pool.query(
+      'UPDATE coupons SET used = $1 WHERE id = $2 RETURNING *',
+      [used, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Coupon not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating coupon:', error);
+    res.status(500).json({ message: 'Server error while updating coupon' });
   }
 });
 

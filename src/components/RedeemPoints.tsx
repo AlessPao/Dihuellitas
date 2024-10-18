@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react'
-import { Gift, Check } from 'lucide-react'
+import { Gift, Check, Camera } from 'lucide-react'
 
 const RedeemPoints: React.FC = () => {
   const [points, setPoints] = useState(0)
   const [selectedReward, setSelectedReward] = useState('')
   const [message, setMessage] = useState('')
+  const [coupon, setCoupon] = useState<{ code: string; reward: string; expiration_date: string } | null>(null)
+  const [coupons, setCoupons] = useState<Array<{ code: string; reward: string; expiration_date: string; used: boolean }>>([])
 
   const rewards = [
     { name: '10% Discount', cost: 30 },
@@ -14,6 +16,7 @@ const RedeemPoints: React.FC = () => {
 
   useEffect(() => {
     fetchPoints()
+    fetchCoupons()
   }, [])
 
   const fetchPoints = async () => {
@@ -37,26 +40,49 @@ const RedeemPoints: React.FC = () => {
     }
   }
 
+  const fetchCoupons = async () => {
+    try {
+      const token = localStorage.getItem('token')
+      const response = await fetch('http://localhost:5000/api/coupons', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        setCoupons(data)
+      } else {
+        setMessage(data.message)
+      }
+    } catch (error) {
+      setMessage('An error occurred while fetching coupons.')
+    }
+  }
+
   const handleRedeem = async () => {
     const reward = rewards.find((r) => r.name === selectedReward)
     if (reward && points >= reward.cost) {
       try {
         const token = localStorage.getItem('token')
-        const response = await fetch('http://localhost:5000/api/redeem', {
+        const response = await fetch('http://localhost:5000/api/coupons', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`,
           },
-          body: JSON.stringify({ rewardCost: reward.cost }),
+          body: JSON.stringify({ rewardName: reward.name, rewardCost: reward.cost }),
         })
 
         const data = await response.json()
 
         if (response.ok) {
           setPoints(points - reward.cost)
+          setCoupon(data)
           setMessage(`Coupon generated for ${selectedReward}!`)
           setSelectedReward('')
+          fetchCoupons() // Refresh the coupons list
         } else {
           setMessage(data.message)
         }
@@ -104,6 +130,35 @@ const RedeemPoints: React.FC = () => {
           <Check size={18} className="mr-2" />
           Redeem Selected Reward
         </button>
+      </div>
+      
+      {coupon && (
+        <div className="mt-8">
+          <div className="bg-white p-6 rounded-lg shadow-md border-2 border-dashed border-green-500">
+            <h3 className="text-2xl font-bold text-center mb-4">Your New Coupon</h3>
+            <div className="text-center">
+              <p className="text-lg font-semibold mb-2">{coupon.reward}</p>
+              <p className="text-3xl font-bold mb-4">{coupon.code}</p>
+              <p className="text-sm text-gray-600 mb-4">Valid until {new Date(coupon.expiration_date).toLocaleDateString()}</p>
+            </div>
+            <div className="flex items-center justify-center text-green-600">
+              <Camera size={24} className="mr-2" />
+              <p className="text-sm font-medium">Take a screenshot of this coupon</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-8">
+        <h2 className="text-2xl font-bold mb-4">Your Coupons</h2>
+        {coupons.map((coupon) => (
+          <div key={coupon.code} className="bg-white p-4 rounded-lg shadow-md mb-4">
+            <p className="font-semibold">{coupon.reward}</p>
+            <p className="text-sm">Code: {coupon.code}</p>
+            <p className="text-sm">Expires: {new Date(coupon.expiration_date).toLocaleDateString()}</p>
+            <p className="text-sm">{coupon.used ? 'Used' : 'Not used'}</p>
+          </div>
+        ))}
       </div>
     </div>
   )
